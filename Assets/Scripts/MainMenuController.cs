@@ -7,7 +7,7 @@ public class MainMenuController : MonoBehaviour
     public void Jugar()
     {
         // Reemplaza "NombreDeTuEscenaDelJuego" con el nombre exacto de la escena de tu juego
-        SceneManager.LoadScene("SampleScene");
+        SceneManager.LoadScene("GameScene");
     }
 
     public void Salir()
