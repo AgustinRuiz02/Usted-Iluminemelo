@@ -73,6 +73,27 @@ public class RhythmLaneController : MonoBehaviour
     [Min(1f)]
     public float hitWindowPixels = 45f;
 
+    [Header("Nivel")]
+    [Min(1f)]
+    public float levelDuration = 30f;
+
+    [Min(1)]
+    public int maxLives = 5;
+
+    [Min(0)]
+    public int pointsPerHit = 50;
+
+    [Header("UI del nivel")]
+    public Slider progressBar;
+    public Text scoreText;
+    public Text livesText;
+    public Text timerText;
+
+    [Header("Paneles finales")]
+    public GameObject victoryPanel;
+    public GameObject defeatPanel;
+    public Text finalScoreText;
+
     [Header("Respuesta visual")]
     [Min(0f)]
     public float successDisplayTime = 0.45f;
@@ -89,23 +110,26 @@ public class RhythmLaneController : MonoBehaviour
     public bool startAutomatically = true;
 
     private RhythmCharacter[] characters;
+
     private readonly List<RhythmNote> notes =
         new List<RhythmNote>();
 
     private float spawnTimer;
     private float reactionTimer;
     private float blinkTimer;
+    private float elapsedTime;
 
     private int score;
-    private int misses;
+    private int lives;
+
     private int blinkChanges;
 
     private bool started;
     private bool reacting;
     private bool blinking;
     private bool blinkIsOn;
+    private bool levelFinished;
 
-    // Personaje específico de la nota fallida.
     private RhythmCharacter missCharacter;
 
     void Start()
@@ -115,10 +139,20 @@ public class RhythmLaneController : MonoBehaviour
             aura, nyx, pulse, ray
         };
 
+        lives = maxLives;
+
         TurnCharactersOff();
 
         if (cristySprite != null)
             cristySprite.color = Color.white;
+
+        if (victoryPanel != null)
+            victoryPanel.SetActive(false);
+
+        if (defeatPanel != null)
+            defeatPanel.SetActive(false);
+
+        UpdateUI();
 
         if (startAutomatically)
             StartGame();
@@ -128,15 +162,34 @@ public class RhythmLaneController : MonoBehaviour
     {
         if (!started)
         {
-            if (Input.GetKeyDown(KeyCode.Space))
+            if (!levelFinished &&
+                Input.GetKeyDown(KeyCode.Space))
+            {
                 StartGame();
+            }
 
+            return;
+        }
+
+        // Actualizar duración del nivel.
+        elapsedTime += Time.deltaTime;
+
+        UpdateLevelProgress();
+
+        // Comprobar si terminó el nivel.
+        if (elapsedTime >= levelDuration)
+        {
+            WinGame();
             return;
         }
 
         UpdateNotes();
         CheckInputs();
         UpdateReaction();
+
+        // No generar más notas si el nivel terminó.
+        if (!started)
+            return;
 
         spawnTimer -= Time.deltaTime;
 
@@ -149,6 +202,9 @@ public class RhythmLaneController : MonoBehaviour
 
     public void StartGame()
     {
+        if (levelFinished)
+            return;
+
         if (characters == null)
         {
             characters = new RhythmCharacter[]
@@ -158,9 +214,32 @@ public class RhythmLaneController : MonoBehaviour
         }
 
         started = true;
+        elapsedTime = 0f;
         spawnTimer = 0.4f;
 
-        Debug.Log("¡Comienza el carril rítmico!");
+        score = 0;
+        lives = maxLives;
+
+        reacting = false;
+        blinking = false;
+        missCharacter = null;
+
+        TurnCharactersOff();
+
+        if (cristySprite != null)
+            cristySprite.color = Color.white;
+
+        ClearNotes();
+
+        if (victoryPanel != null)
+            victoryPanel.SetActive(false);
+
+        if (defeatPanel != null)
+            defeatPanel.SetActive(false);
+
+        UpdateUI();
+
+        Debug.Log("¡Comienza el nivel!");
     }
 
     void SpawnNote()
@@ -178,17 +257,20 @@ public class RhythmLaneController : MonoBehaviour
             characters[Random.Range(0, characters.Length)];
 
         Image image = Instantiate(notePrefab, laneArea);
+
         RectTransform rect = image.rectTransform;
 
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
+
         rect.sizeDelta = new Vector2(noteSize, noteSize);
 
         float startX = laneArea.rect.width * 0.5f
                      + noteSize * 0.5f;
 
         rect.anchoredPosition = new Vector2(startX, 0f);
+
         image.color = character.noteColor;
 
         notes.Add(new RhythmNote
@@ -212,16 +294,21 @@ public class RhythmLaneController : MonoBehaviour
                 continue;
 
             Vector2 position = note.rect.anchoredPosition;
+
             position.x -= noteSpeed * Time.deltaTime;
+
             note.rect.anchoredPosition = position;
 
             // La nota pasó el marcador sin acertarse.
             if (position.x < markerX - hitWindowPixels)
             {
                 ResolveMiss(note);
+
+                if (!started)
+                    return;
             }
 
-            // Eliminar notas que salieron completamente del carril.
+            // Eliminar notas que salieron del carril.
             if (position.x <
                 -laneArea.rect.width * 0.5f - noteSize)
             {
@@ -239,6 +326,7 @@ public class RhythmLaneController : MonoBehaviour
                 continue;
 
             RhythmNote nearestNote = null;
+
             float nearestDistance = float.MaxValue;
             float markerX = GetMarkerX();
 
@@ -258,7 +346,6 @@ public class RhythmLaneController : MonoBehaviour
                 }
             }
 
-            // No hay ninguna nota en la zona de pulsación.
             if (nearestNote == null)
             {
                 Debug.Log("Pulsación fuera de tiempo.");
@@ -289,15 +376,16 @@ public class RhythmLaneController : MonoBehaviour
 
     void ResolveHit(RhythmNote note)
     {
-        if (note.resolved)
+        if (note.resolved || !started)
             return;
 
         note.resolved = true;
-        score++;
+
+        // Sumar 50 puntos por pose correcta.
+        score += pointsPerHit;
 
         Color successColor = note.character.noteColor;
 
-        // Solo se ilumina el personaje correcto.
         TurnCharactersOff();
 
         if (note.character.sprite != null)
@@ -312,42 +400,53 @@ public class RhythmLaneController : MonoBehaviour
             "¡ACIerto! " + note.character.characterName +
             " | Puntos: " + score);
 
-        // Cancelar cualquier parpadeo anterior.
         blinking = false;
         missCharacter = null;
 
         reacting = true;
         reactionTimer = successDisplayTime;
+
+        UpdateUI();
     }
 
     void ResolveMiss(RhythmNote note)
     {
-        if (note.resolved)
+        if (note.resolved || !started)
             return;
 
         note.resolved = true;
-        misses++;
 
-        // Guardamos el personaje de la nota que se falló.
+        // Guardar el personaje de la nota fallida.
         missCharacter = note.character;
 
         Destroy(note.image.gameObject);
 
+        // Cada fallo resta una vida.
+        lives--;
+
         Debug.Log(
             "¡FALLO! Nota de " + missCharacter.characterName +
-            " | Fallos: " + misses);
+            " | Vidas restantes: " + lives);
 
         reacting = false;
         blinking = true;
+
         blinkIsOn = false;
         blinkChanges = 0;
         blinkTimer = blinkInterval;
 
-        // Apagar todos los personajes al comenzar el fallo.
         TurnCharactersOff();
 
         if (cristySprite != null)
             cristySprite.color = Color.white;
+
+        UpdateUI();
+
+        // Derrota inmediata al quedarse sin vidas.
+        if (lives <= 0)
+        {
+            LoseGame();
+        }
     }
 
     void UpdateReaction()
@@ -359,6 +458,7 @@ public class RhythmLaneController : MonoBehaviour
             if (reactionTimer <= 0f)
             {
                 reacting = false;
+
                 TurnCharactersOff();
 
                 if (cristySprite != null)
@@ -373,6 +473,7 @@ public class RhythmLaneController : MonoBehaviour
             if (blinkTimer <= 0f)
             {
                 blinkTimer = blinkInterval;
+
                 blinkIsOn = !blinkIsOn;
                 blinkChanges++;
 
@@ -387,7 +488,7 @@ public class RhythmLaneController : MonoBehaviour
                     missCharacter.sprite.color = color;
                 }
 
-                // Cristy parpadea sincronizado con ese personaje.
+                // Cristy parpadea al mismo tiempo.
                 if (cristySprite != null)
                     cristySprite.color = color;
 
@@ -408,6 +509,123 @@ public class RhythmLaneController : MonoBehaviour
                 }
             }
         }
+    }
+
+    void UpdateLevelProgress()
+    {
+        float progress = Mathf.Clamp01(
+            elapsedTime / levelDuration);
+
+        if (progressBar != null)
+            progressBar.value = progress;
+
+        float remainingTime = Mathf.Max(
+            0f, levelDuration - elapsedTime);
+
+        int seconds = Mathf.CeilToInt(remainingTime);
+
+        if (timerText != null)
+        {
+            timerText.text = string.Format(
+                "{0:00}:{1:00}",
+                seconds / 60,
+                seconds % 60);
+        }
+    }
+
+    void UpdateUI()
+    {
+        if (scoreText != null)
+            scoreText.text = "Puntos: " + score;
+
+        if (livesText != null)
+            livesText.text = "Vidas: " + lives;
+
+        if (progressBar != null)
+            progressBar.value = Mathf.Clamp01(
+                elapsedTime / levelDuration);
+
+        if (timerText != null)
+        {
+            float remainingTime = Mathf.Max(
+                0f, levelDuration - elapsedTime);
+
+            int seconds = Mathf.CeilToInt(remainingTime);
+
+            timerText.text = string.Format(
+                "{0:00}:{1:00}",
+                seconds / 60,
+                seconds % 60);
+        }
+    }
+
+    void WinGame()
+    {
+        if (levelFinished)
+            return;
+
+        EndGame(true);
+    }
+
+    void LoseGame()
+    {
+        if (levelFinished)
+            return;
+
+        EndGame(false);
+    }
+
+    void EndGame(bool victory)
+    {
+        started = false;
+        levelFinished = true;
+
+        reacting = false;
+        blinking = false;
+
+        TurnCharactersOff();
+
+        if (cristySprite != null)
+            cristySprite.color = Color.white;
+
+        ClearNotes();
+
+        if (victoryPanel != null)
+            victoryPanel.SetActive(victory);
+
+        if (defeatPanel != null)
+            defeatPanel.SetActive(!victory);
+
+        if (finalScoreText != null)
+            finalScoreText.text = "Puntaje final: " + score;
+
+        if (victory)
+        {
+            if (progressBar != null)
+                progressBar.value = 1f;
+
+            if (timerText != null)
+                timerText.text = "00:00";
+
+            Debug.Log(
+                "¡VICTORIA! Puntaje final: " + score);
+        }
+        else
+        {
+            Debug.Log(
+                "DERROTA. Puntaje final: " + score);
+        }
+    }
+
+    void ClearNotes()
+    {
+        foreach (RhythmNote note in notes)
+        {
+            if (note.image != null)
+                Destroy(note.image.gameObject);
+        }
+
+        notes.Clear();
     }
 
     void TurnCharactersOff()
