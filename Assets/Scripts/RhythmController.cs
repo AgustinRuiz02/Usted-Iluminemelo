@@ -2,641 +2,940 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 
 public class RhythmLaneController : MonoBehaviour
 {
+    // =====================================================
+    // PERSONAJES
+    // =====================================================
+
     [System.Serializable]
     public class RhythmCharacter
     {
         public string characterName;
         public KeyCode key;
-        public Color noteColor = Color.white;
+        public Color noteColor;
         public SpriteRenderer sprite;
     }
 
     private class RhythmNote
     {
-        public RectTransform rect;
+        public RectTransform rectTransform;
         public Image image;
+
         public RhythmCharacter character;
-        public bool resolved;
+        public RhythmCharacter character2;
+
+        public RhythmCharacter pendingCharacter;
+        public float pendingTime;
     }
 
-    [Header("Carril UI")]
-    public RectTransform laneArea;
-    public RectTransform hitMarker;
-    public Image notePrefab;
+    [Header("Personajes")]
+    public RhythmCharacter aura;
+    public RhythmCharacter nyx;
+    public RhythmCharacter pulse;
+    public RhythmCharacter ray;
 
-    [Header("Personajes y teclas")]
-    public RhythmCharacter aura = new RhythmCharacter
-    {
-        characterName = "Aura",
-        key = KeyCode.Q,
-        noteColor = Color.blue
-    };
-
-    public RhythmCharacter nyx = new RhythmCharacter
-    {
-        characterName = "Nyx",
-        key = KeyCode.W,
-        noteColor = Color.red
-    };
-
-    public RhythmCharacter pulse = new RhythmCharacter
-    {
-        characterName = "Pulse",
-        key = KeyCode.E,
-        noteColor = Color.yellow
-    };
-
-    public RhythmCharacter ray = new RhythmCharacter
-    {
-        characterName = "Ray",
-        key = KeyCode.R,
-        noteColor = Color.green
-    };
-
-    [Header("Cristy")]
     public SpriteRenderer cristySprite;
 
-    [Header("Movimiento de notas")]
-    [Min(10f)]
-    public float noteSpeed = 350f;
+    private RhythmCharacter[] characters;
 
-    [Min(0.2f)]
-    public float spawnInterval = 1.3f;
+    // =====================================================
+    // PANTALLAS PREVIAS Y FINALES
+    // =====================================================
 
-    [Min(10f)]
-    public float noteSize = 40f;
+    [Header("Paneles de navegación")]
+    public GameObject comicPanel;
+    public GameObject loadingPanel;
+    public GameObject tutorialPanel;
 
-    [Tooltip("Distancia máxima al marcador para permitir acertar.")]
-    [Min(1f)]
-    public float hitWindowPixels = 45f;
+    [Header("Paneles de resultados")]
+    public GameObject victoryPanel;
+    public GameObject defeatPanel;
 
-    [Header("Nivel")]
-    [Min(1f)]
-    public float levelDuration = 30f;
+    [Header("Nombre de la escena del menú")]
+    public string menuSceneName = "Menu";
 
-    [Min(1)]
-    public int maxLives = 5;
+    // =====================================================
+    // ELEMENTOS DEL GAMEPLAY
+    // =====================================================
 
-    [Min(0)]
-    public int pointsPerHit = 50;
-
-    [Header("UI del nivel")]
+    [Header("Elementos del gameplay en el Canvas")]
+    public RectTransform laneArea;
     public Slider progressBar;
     public Text scoreText;
     public Text livesText;
     public Text timerText;
+    public Text comboText;
 
-    [Header("Paneles finales")]
-    public GameObject victoryPanel;
-    public GameObject defeatPanel;
-    public Text finalScoreText;
+    // =====================================================
+    // CONFIGURACIÓN DE NOTAS
+    // =====================================================
 
-    [Header("Respuesta visual")]
-    [Min(0f)]
+    [Header("Configuración de notas")]
+    public RectTransform hitMarker;
+    public Image notePrefab;
+
+    public float noteSpeed = 350f;
+    public float spawnInterval = 1.3f;
+    public float noteSize = 40f;
+    public float hitWindowPixels = 45f;
+
+    [Header("Poses combinadas")]
+    [Range(0f, 1f)]
+    public float combinedNoteChance = 0.25f;
+
+    public int pointsPerCombinedHit = 100;
+
+    [Tooltip("Tiempo máximo entre las dos teclas.")]
+    public float chordWindow = 0.15f;
+
+    private List<RhythmNote> activeNotes = new List<RhythmNote>();
+
+    private float spawnTimer = 0f;
+
+    // =====================================================
+    // CONFIGURACIÓN DEL NIVEL
+    // =====================================================
+
+    [Header("Configuración del nivel")]
+    public float levelDuration = 30f;
+    public int maxLives = 5;
+    public int pointsPerHit = 50;
+
+    private int score = 0;
+    private int lives = 0;
+    private int combo = 0;
+
+    private float elapsedTime = 0f;
+
+    private bool gameStarted = false;
+    private bool levelFinished = false;
+
+    // =====================================================
+    // RESULTADOS
+    // =====================================================
+
+    [Header("Textos de resultados")]
+    public Text victoryScoreText;
+    public Text defeatScoreText;
+
+    // =====================================================
+    // REACCIONES VISUALES
+    // =====================================================
+
+    [Header("Duración de las reacciones")]
     public float successDisplayTime = 0.45f;
 
+    [Header("Parpadeo al fallar")]
     public Color missColor = Color.black;
-
-    [Min(0.05f)]
     public float blinkInterval = 0.12f;
-
-    [Min(1)]
     public int blinkCount = 2;
 
-    [Header("Inicio")]
-    public bool startAutomatically = true;
+    private float reactionTimer = 0f;
+    private float blinkTimer = 0f;
 
-    private RhythmCharacter[] characters;
+    private bool isBlinking = false;
+    private bool blinkVisible = false;
+    private bool successReaction = false;
 
-    private readonly List<RhythmNote> notes =
-        new List<RhythmNote>();
+    private int currentBlinkCount = 0;
 
-    private float spawnTimer;
-    private float reactionTimer;
-    private float blinkTimer;
-    private float elapsedTime;
+    private RhythmCharacter reactionCharacter;
+    private RhythmCharacter reactionCharacter2;
 
-    private int score;
-    private int lives;
+    // =====================================================
+    // INICIO
+    // =====================================================
 
-    private int blinkChanges;
-
-    private bool started;
-    private bool reacting;
-    private bool blinking;
-    private bool blinkIsOn;
-    private bool levelFinished;
-
-    private RhythmCharacter missCharacter;
-
-    void Start()
+    private void Start()
     {
         characters = new RhythmCharacter[]
         {
-            aura, nyx, pulse, ray
+            aura,
+            nyx,
+            pulse,
+            ray
         };
 
-        lives = maxLives;
+        RestoreCharacterColors();
 
-        TurnCharactersOff();
-
-        if (cristySprite != null)
-            cristySprite.color = Color.white;
-
-        if (victoryPanel != null)
-            victoryPanel.SetActive(false);
-
-        if (defeatPanel != null)
-            defeatPanel.SetActive(false);
+        ShowComicScreen();
 
         UpdateUI();
-
-        if (startAutomatically)
-            StartGame();
     }
 
-    void Update()
+    private void Update()
     {
-        if (!started)
-        {
-            if (!levelFinished &&
-                Input.GetKeyDown(KeyCode.Space))
-            {
-                StartGame();
-            }
-
+        if (!gameStarted || levelFinished)
             return;
-        }
 
-        // Actualizar duración del nivel.
         elapsedTime += Time.deltaTime;
 
         UpdateLevelProgress();
-
-        // Comprobar si terminó el nivel.
-        if (elapsedTime >= levelDuration)
-        {
-            WinGame();
-            return;
-        }
-
         UpdateNotes();
-        CheckInputs();
-        UpdateReaction();
 
-        // No generar más notas si el nivel terminó.
-        if (!started)
-            return;
-
-        spawnTimer -= Time.deltaTime;
-
-        if (spawnTimer <= 0f)
-        {
-            SpawnNote();
-            spawnTimer = spawnInterval;
-        }
-    }
-
-    public void StartGame()
-    {
         if (levelFinished)
             return;
 
-        if (characters == null)
+        CheckInputs();
+
+        if (levelFinished)
+            return;
+
+        UpdateReaction();
+
+        spawnTimer += Time.deltaTime;
+
+        if (spawnTimer >= spawnInterval)
         {
-            characters = new RhythmCharacter[]
-            {
-                aura, nyx, pulse, ray
-            };
+            SpawnNote();
+            spawnTimer = 0f;
         }
 
-        started = true;
-        elapsedTime = 0f;
-        spawnTimer = 0.4f;
+        if (elapsedTime >= levelDuration)
+        {
+            WinGame();
+        }
+    }
+
+    // =====================================================
+    // NAVEGACIÓN ENTRE PANELES
+    // =====================================================
+
+    private void ShowComicScreen()
+    {
+        gameStarted = false;
+        levelFinished = false;
+
+        SetPanel(comicPanel, true);
+        SetPanel(loadingPanel, false);
+        SetPanel(tutorialPanel, false);
+
+        SetPanel(victoryPanel, false);
+        SetPanel(defeatPanel, false);
+
+        SetGameplayUI(false);
+    }
+
+    public void OnComicContinue()
+    {
+        SetPanel(comicPanel, false);
+        SetPanel(loadingPanel, true);
+    }
+
+    public void OnLoadingContinue()
+    {
+        SetPanel(loadingPanel, false);
+        SetPanel(tutorialPanel, true);
+    }
+
+    public void OnTutorialContinue()
+    {
+        SetPanel(tutorialPanel, false);
+
+        SetGameplayUI(true);
+
+        StartGame();
+    }
+
+    private void SetPanel(GameObject panel, bool state)
+    {
+        if (panel != null)
+            panel.SetActive(state);
+    }
+
+    // =====================================================
+    // MOSTRAR / OCULTAR GAMEPLAY
+    // =====================================================
+
+    private void SetGameplayUI(bool state)
+    {
+        if (laneArea != null)
+            laneArea.gameObject.SetActive(state);
+
+        if (progressBar != null)
+            progressBar.gameObject.SetActive(state);
+
+        if (scoreText != null)
+            scoreText.gameObject.SetActive(state);
+
+        if (livesText != null)
+            livesText.gameObject.SetActive(state);
+
+        if (timerText != null)
+            timerText.gameObject.SetActive(state);
+
+        if (comboText != null)
+            comboText.gameObject.SetActive(state);
+    }
+
+    // =====================================================
+    // INICIAR PARTIDA
+    // =====================================================
+
+    public void StartGame()
+    {
+        ClearNotes();
 
         score = 0;
         lives = maxLives;
+        combo = 0;
 
-        reacting = false;
-        blinking = false;
-        missCharacter = null;
+        elapsedTime = 0f;
+        spawnTimer = 0f;
 
-        TurnCharactersOff();
+        gameStarted = true;
+        levelFinished = false;
 
-        if (cristySprite != null)
-            cristySprite.color = Color.white;
+        isBlinking = false;
+        successReaction = false;
 
-        ClearNotes();
+        reactionCharacter = null;
+        reactionCharacter2 = null;
 
-        if (victoryPanel != null)
-            victoryPanel.SetActive(false);
+        RestoreCharacterColors();
 
-        if (defeatPanel != null)
-            defeatPanel.SetActive(false);
+        if (progressBar != null)
+            progressBar.value = 0f;
 
         UpdateUI();
-
-        Debug.Log("¡Comienza el nivel!");
     }
 
-    void SpawnNote()
-    {
-        if (laneArea == null || notePrefab == null)
-        {
-            Debug.LogError(
-                "Asigná Lane Area y Note Prefab en el Inspector.");
+    // =====================================================
+    // VOLVER AL MENÚ
+    // =====================================================
 
-            started = false;
+    public void ReturnToMenu()
+    {
+        SceneManager.LoadScene(menuSceneName);
+    }
+
+    // =====================================================
+    // GENERAR NOTAS
+    // =====================================================
+
+    private void SpawnNote()
+    {
+        if (laneArea == null || notePrefab == null || characters == null)
             return;
+
+        if (characters.Length < 2)
+            return;
+
+        Image newNote = Instantiate(notePrefab, laneArea);
+
+        RectTransform noteRect = newNote.rectTransform;
+
+        noteRect.sizeDelta = new Vector2(noteSize, noteSize);
+
+        float spawnX = laneArea.rect.width / 2f + noteSize;
+
+        noteRect.anchoredPosition = new Vector2(spawnX, 0f);
+
+        RhythmNote rhythmNote = new RhythmNote();
+
+        rhythmNote.rectTransform = noteRect;
+        rhythmNote.image = newNote;
+
+        bool createCombinedNote =
+            Random.value < combinedNoteChance;
+
+        if (createCombinedNote)
+        {
+            int firstIndex = Random.Range(0, characters.Length);
+
+            int secondIndex = Random.Range(0, characters.Length - 1);
+
+            if (secondIndex >= firstIndex)
+                secondIndex++;
+
+            rhythmNote.character = characters[firstIndex];
+            rhythmNote.character2 = characters[secondIndex];
+
+            CreateCombinedVisual(
+                newNote,
+                rhythmNote.character.noteColor,
+                rhythmNote.character2.noteColor
+            );
+        }
+        else
+        {
+            rhythmNote.character =
+                characters[Random.Range(0, characters.Length)];
+
+            newNote.color = rhythmNote.character.noteColor;
         }
 
-        RhythmCharacter character =
-            characters[Random.Range(0, characters.Length)];
-
-        Image image = Instantiate(notePrefab, laneArea);
-
-        RectTransform rect = image.rectTransform;
-
-        rect.anchorMin = new Vector2(0.5f, 0.5f);
-        rect.anchorMax = new Vector2(0.5f, 0.5f);
-        rect.pivot = new Vector2(0.5f, 0.5f);
-
-        rect.sizeDelta = new Vector2(noteSize, noteSize);
-
-        float startX = laneArea.rect.width * 0.5f
-                     + noteSize * 0.5f;
-
-        rect.anchoredPosition = new Vector2(startX, 0f);
-
-        image.color = character.noteColor;
-
-        notes.Add(new RhythmNote
-        {
-            rect = rect,
-            image = image,
-            character = character,
-            resolved = false
-        });
+        activeNotes.Add(rhythmNote);
     }
 
-    void UpdateNotes()
+    // =====================================================
+    // VISUAL DE DOS MITADES
+    // =====================================================
+
+    private void CreateCombinedVisual(
+        Image rootImage,
+        Color firstColor,
+        Color secondColor)
+    {
+        // Ocultamos la imagen original del prefab.
+        rootImage.enabled = false;
+
+        Sprite noteSprite = rootImage.sprite;
+
+        // Mitad izquierda.
+        Image leftImage = CreateHalfImage(
+            rootImage.rectTransform,
+            noteSprite,
+            "LeftColor",
+            firstColor
+        );
+
+        RectTransform leftRect = leftImage.rectTransform;
+
+        leftRect.anchorMin = new Vector2(0f, 0f);
+        leftRect.anchorMax = new Vector2(0.5f, 1f);
+        leftRect.offsetMin = Vector2.zero;
+        leftRect.offsetMax = Vector2.zero;
+
+        // Mitad derecha.
+        Image rightImage = CreateHalfImage(
+            rootImage.rectTransform,
+            noteSprite,
+            "RightColor",
+            secondColor
+        );
+
+        RectTransform rightRect = rightImage.rectTransform;
+
+        rightRect.anchorMin = new Vector2(0.5f, 0f);
+        rightRect.anchorMax = new Vector2(1f, 1f);
+        rightRect.offsetMin = Vector2.zero;
+        rightRect.offsetMax = Vector2.zero;
+    }
+
+    private Image CreateHalfImage(
+        RectTransform parent,
+        Sprite sprite,
+        string objectName,
+        Color color)
+    {
+        GameObject halfObject = new GameObject(
+            objectName,
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image)
+        );
+
+        halfObject.transform.SetParent(parent, false);
+
+        Image halfImage = halfObject.GetComponent<Image>();
+
+        halfImage.sprite = sprite;
+        halfImage.color = color;
+        halfImage.raycastTarget = false;
+        halfImage.type = Image.Type.Simple;
+
+        return halfImage;
+    }
+
+    // =====================================================
+    // MOVIMIENTO DE NOTAS
+    // =====================================================
+
+    private void UpdateNotes()
     {
         float markerX = GetMarkerX();
 
-        for (int i = notes.Count - 1; i >= 0; i--)
+        for (int i = activeNotes.Count - 1; i >= 0; i--)
         {
-            RhythmNote note = notes[i];
+            RhythmNote note = activeNotes[i];
 
-            if (note.resolved)
+            if (note == null || note.rectTransform == null)
+            {
+                activeNotes.RemoveAt(i);
                 continue;
+            }
 
-            Vector2 position = note.rect.anchoredPosition;
+            Vector2 position = note.rectTransform.anchoredPosition;
 
             position.x -= noteSpeed * Time.deltaTime;
 
-            note.rect.anchoredPosition = position;
+            note.rectTransform.anchoredPosition = position;
 
-            // La nota pasó el marcador sin acertarse.
             if (position.x < markerX - hitWindowPixels)
             {
                 ResolveMiss(note);
 
-                if (!started)
+                if (levelFinished)
                     return;
-            }
-
-            // Eliminar notas que salieron del carril.
-            if (position.x <
-                -laneArea.rect.width * 0.5f - noteSize)
-            {
-                Destroy(note.image.gameObject);
-                notes.RemoveAt(i);
             }
         }
     }
 
-    void CheckInputs()
+    private float GetMarkerX()
     {
-        for (int c = 0; c < characters.Length; c++)
+        if (hitMarker == null)
+            return 0f;
+
+        return hitMarker.anchoredPosition.x;
+    }
+
+    // =====================================================
+    // DETECCIÓN DE TECLAS
+    // =====================================================
+
+    private void CheckInputs()
+    {
+        float markerX = GetMarkerX();
+
+        for (int i = activeNotes.Count - 1; i >= 0; i--)
         {
-            if (!Input.GetKeyDown(characters[c].key))
+            RhythmNote note = activeNotes[i];
+
+            if (note == null || note.rectTransform == null)
                 continue;
 
-            RhythmNote nearestNote = null;
+            float distance = Mathf.Abs(
+                note.rectTransform.anchoredPosition.x - markerX
+            );
 
-            float nearestDistance = float.MaxValue;
-            float markerX = GetMarkerX();
+            if (distance > hitWindowPixels)
+                continue;
 
-            foreach (RhythmNote note in notes)
+            bool firstKeyDown =
+                Input.GetKeyDown(note.character.key);
+
+            // ---------------------------------------------
+            // POSE NORMAL
+            // ---------------------------------------------
+
+            if (note.character2 == null)
             {
-                if (note.resolved)
-                    continue;
-
-                float distance = Mathf.Abs(
-                    note.rect.anchoredPosition.x - markerX);
-
-                if (distance <= hitWindowPixels &&
-                    distance < nearestDistance)
+                if (firstKeyDown)
                 {
-                    nearestDistance = distance;
-                    nearestNote = note;
+                    ResolveHit(note);
+                    return;
                 }
-            }
 
-            if (nearestNote == null)
-            {
-                Debug.Log("Pulsación fuera de tiempo.");
                 continue;
             }
 
-            if (nearestNote.character == characters[c])
+            // ---------------------------------------------
+            // POSE COMBINADA
+            // ---------------------------------------------
+
+            bool secondKeyDown =
+                Input.GetKeyDown(note.character2.key);
+
+            // Si se presionan las dos teclas en el mismo frame.
+            if (firstKeyDown && secondKeyDown)
             {
-                ResolveHit(nearestNote);
+                ResolveHit(note);
+                return;
+            }
+
+            // Si la primera tecla presionada ya expiró.
+            if (note.pendingCharacter != null &&
+                Time.time - note.pendingTime > chordWindow)
+            {
+                note.pendingCharacter = null;
+            }
+
+            // Primera tecla.
+            if (note.pendingCharacter == null)
+            {
+                if (firstKeyDown)
+                {
+                    note.pendingCharacter = note.character;
+                    note.pendingTime = Time.time;
+                    return;
+                }
+
+                if (secondKeyDown)
+                {
+                    note.pendingCharacter = note.character2;
+                    note.pendingTime = Time.time;
+                    return;
+                }
             }
             else
             {
-                ResolveMiss(nearestNote);
-            }
+                // Ya se presionó la primera: esperamos la otra.
+                if (note.pendingCharacter == note.character &&
+                    secondKeyDown)
+                {
+                    ResolveHit(note);
+                    return;
+                }
 
-            return;
+                if (note.pendingCharacter == note.character2 &&
+                    firstKeyDown)
+                {
+                    ResolveHit(note);
+                    return;
+                }
+            }
         }
     }
 
-    float GetMarkerX()
-    {
-        if (hitMarker == null || laneArea == null)
-            return 0f;
+    // =====================================================
+    // ACIERTO
+    // =====================================================
 
-        return laneArea.InverseTransformPoint(
-            hitMarker.position).x;
-    }
-
-    void ResolveHit(RhythmNote note)
+    private void ResolveHit(RhythmNote note)
     {
-        if (note.resolved || !started)
+        if (note == null || !activeNotes.Contains(note))
             return;
 
-        note.resolved = true;
+        // Puntaje según el tipo de pose.
+        if (note.character2 != null)
+            score += pointsPerCombinedHit;
+        else
+            score += pointsPerHit;
 
-        // Sumar 50 puntos por pose correcta.
-        score += pointsPerHit;
+        combo++;
 
-        Color successColor = note.character.noteColor;
+        activeNotes.Remove(note);
 
-        TurnCharactersOff();
+        if (note.image != null)
+            Destroy(note.image.gameObject);
 
-        if (note.character.sprite != null)
-            note.character.sprite.color = successColor;
+        reactionCharacter = note.character;
+        reactionCharacter2 = note.character2;
 
-        if (cristySprite != null)
-            cristySprite.color = successColor;
+        successReaction = true;
+        isBlinking = false;
 
-        Destroy(note.image.gameObject);
-
-        Debug.Log(
-            "¡ACIerto! " + note.character.characterName +
-            " | Puntos: " + score);
-
-        blinking = false;
-        missCharacter = null;
-
-        reacting = true;
         reactionTimer = successDisplayTime;
 
+        // Primer personaje.
+        if (reactionCharacter != null &&
+            reactionCharacter.sprite != null)
+        {
+            reactionCharacter.sprite.enabled = true;
+            reactionCharacter.sprite.color =
+                reactionCharacter.noteColor;
+        }
+
+        // Segundo personaje, si es una pose combinada.
+        if (reactionCharacter2 != null &&
+            reactionCharacter2.sprite != null)
+        {
+            reactionCharacter2.sprite.enabled = true;
+            reactionCharacter2.sprite.color =
+                reactionCharacter2.noteColor;
+        }
+
+        // Cristy toma el color normal o la mezcla de ambos.
+        if (cristySprite != null)
+        {
+            cristySprite.enabled = true;
+
+            if (reactionCharacter2 != null)
+            {
+                cristySprite.color = Color.Lerp(
+                    reactionCharacter.noteColor,
+                    reactionCharacter2.noteColor,
+                    0.5f
+                );
+            }
+            else
+            {
+                cristySprite.color =
+                    reactionCharacter.noteColor;
+            }
+        }
+
         UpdateUI();
     }
 
-    void ResolveMiss(RhythmNote note)
+    // =====================================================
+    // ERROR
+    // =====================================================
+
+    private void ResolveMiss(RhythmNote note)
     {
-        if (note.resolved || !started)
+        if (note == null || !activeNotes.Contains(note))
             return;
 
-        note.resolved = true;
+        activeNotes.Remove(note);
 
-        // Guardar el personaje de la nota fallida.
-        missCharacter = note.character;
+        if (note.image != null)
+            Destroy(note.image.gameObject);
 
-        Destroy(note.image.gameObject);
-
-        // Cada fallo resta una vida.
         lives--;
 
-        Debug.Log(
-            "¡FALLO! Nota de " + missCharacter.characterName +
-            " | Vidas restantes: " + lives);
+        combo = 0;
 
-        reacting = false;
-        blinking = true;
+        reactionCharacter = note.character;
+        reactionCharacter2 = note.character2;
 
-        blinkIsOn = false;
-        blinkChanges = 0;
-        blinkTimer = blinkInterval;
+        successReaction = false;
+        isBlinking = true;
 
-        TurnCharactersOff();
+        blinkVisible = true;
+        currentBlinkCount = 0;
+
+        blinkTimer = 0f;
+
+        // Primer personaje.
+        if (reactionCharacter != null &&
+            reactionCharacter.sprite != null)
+        {
+            reactionCharacter.sprite.enabled = true;
+            reactionCharacter.sprite.color = missColor;
+        }
+
+        // Segundo personaje, si corresponde.
+        if (reactionCharacter2 != null &&
+            reactionCharacter2.sprite != null)
+        {
+            reactionCharacter2.sprite.enabled = true;
+            reactionCharacter2.sprite.color = missColor;
+        }
 
         if (cristySprite != null)
-            cristySprite.color = Color.white;
+        {
+            cristySprite.enabled = true;
+            cristySprite.color = missColor;
+        }
 
         UpdateUI();
 
-        // Derrota inmediata al quedarse sin vidas.
         if (lives <= 0)
         {
             LoseGame();
         }
     }
 
-    void UpdateReaction()
+    // =====================================================
+    // ACTUALIZAR REACCIONES
+    // =====================================================
+
+    private void UpdateReaction()
     {
-        if (reacting)
+        if (successReaction)
         {
             reactionTimer -= Time.deltaTime;
 
             if (reactionTimer <= 0f)
             {
-                reacting = false;
-
-                TurnCharactersOff();
-
-                if (cristySprite != null)
-                    cristySprite.color = Color.white;
+                successReaction = false;
+                RestoreCharacterColors();
             }
+
+            return;
         }
 
-        if (blinking)
+        if (!isBlinking)
+            return;
+
+        blinkTimer += Time.deltaTime;
+
+        if (blinkTimer >= blinkInterval)
         {
-            blinkTimer -= Time.deltaTime;
+            blinkTimer = 0f;
 
-            if (blinkTimer <= 0f)
+            blinkVisible = !blinkVisible;
+
+            Color blinkColor =
+                blinkVisible ? missColor : Color.white;
+
+            if (reactionCharacter != null &&
+                reactionCharacter.sprite != null)
             {
-                blinkTimer = blinkInterval;
+                reactionCharacter.sprite.enabled = true;
+                reactionCharacter.sprite.color = blinkColor;
+            }
 
-                blinkIsOn = !blinkIsOn;
-                blinkChanges++;
+            if (reactionCharacter2 != null &&
+                reactionCharacter2.sprite != null)
+            {
+                reactionCharacter2.sprite.enabled = true;
+                reactionCharacter2.sprite.color = blinkColor;
+            }
 
-                Color color = blinkIsOn
-                    ? missColor
-                    : Color.white;
+            if (cristySprite != null)
+            {
+                cristySprite.enabled = true;
+                cristySprite.color = blinkColor;
+            }
 
-                // Solo parpadea el personaje de la nota fallida.
-                if (missCharacter != null &&
-                    missCharacter.sprite != null)
+            if (!blinkVisible)
+            {
+                currentBlinkCount++;
+
+                if (currentBlinkCount >= blinkCount)
                 {
-                    missCharacter.sprite.color = color;
-                }
-
-                // Cristy parpadea al mismo tiempo.
-                if (cristySprite != null)
-                    cristySprite.color = color;
-
-                if (blinkChanges >= blinkCount * 2)
-                {
-                    blinking = false;
-
-                    if (missCharacter != null &&
-                        missCharacter.sprite != null)
-                    {
-                        missCharacter.sprite.color = Color.white;
-                    }
-
-                    if (cristySprite != null)
-                        cristySprite.color = Color.white;
-
-                    missCharacter = null;
+                    isBlinking = false;
+                    RestoreCharacterColors();
                 }
             }
         }
     }
 
-    void UpdateLevelProgress()
+    // =====================================================
+    // RESTAURAR COLORES
+    // =====================================================
+
+    private void RestoreCharacterColors()
     {
-        float progress = Mathf.Clamp01(
-            elapsedTime / levelDuration);
+        if (characters != null)
+        {
+            foreach (RhythmCharacter character in characters)
+            {
+                if (character != null && character.sprite != null)
+                {
+                    character.sprite.enabled = true;
+                    character.sprite.color = Color.white;
+                }
+            }
+        }
+
+        if (cristySprite != null)
+        {
+            cristySprite.enabled = true;
+            cristySprite.color = Color.white;
+        }
+    }
+
+    // =====================================================
+    // PROGRESO DEL NIVEL
+    // =====================================================
+
+    private void UpdateLevelProgress()
+    {
+        if (levelDuration <= 0f)
+            return;
+
+        float progress = Mathf.Clamp01(elapsedTime / levelDuration);
 
         if (progressBar != null)
             progressBar.value = progress;
 
-        float remainingTime = Mathf.Max(
-            0f, levelDuration - elapsedTime);
-
-        int seconds = Mathf.CeilToInt(remainingTime);
-
-        if (timerText != null)
-        {
-            timerText.text = string.Format(
-                "{0:00}:{1:00}",
-                seconds / 60,
-                seconds % 60);
-        }
+        UpdateUI();
     }
 
-    void UpdateUI()
+    // =====================================================
+    // ACTUALIZAR INTERFAZ
+    // =====================================================
+
+    private void UpdateUI()
     {
         if (scoreText != null)
-            scoreText.text = "Puntos: " + score;
+            scoreText.text = "Puntaje: " + score.ToString();
 
         if (livesText != null)
-            livesText.text = "Vidas: " + lives;
-
-        if (progressBar != null)
-            progressBar.value = Mathf.Clamp01(
-                elapsedTime / levelDuration);
+            livesText.text = "Vidas: " + lives.ToString();
 
         if (timerText != null)
         {
-            float remainingTime = Mathf.Max(
-                0f, levelDuration - elapsedTime);
+            float remainingTime =
+                Mathf.Max(0f, levelDuration - elapsedTime);
 
-            int seconds = Mathf.CeilToInt(remainingTime);
+            timerText.text = "Tiempo: " +
+                Mathf.CeilToInt(remainingTime).ToString();
+        }
 
-            timerText.text = string.Format(
-                "{0:00}:{1:00}",
-                seconds / 60,
-                seconds % 60);
+        if (comboText != null)
+            comboText.text = "Combo: x" + combo.ToString();
+
+        if (progressBar != null && levelDuration > 0f)
+        {
+            progressBar.value =
+                Mathf.Clamp01(elapsedTime / levelDuration);
         }
     }
 
-    void WinGame()
-    {
-        if (levelFinished)
-            return;
+    // =====================================================
+    // VICTORIA Y DERROTA
+    // =====================================================
 
+    private void WinGame()
+    {
         EndGame(true);
     }
 
-    void LoseGame()
+    private void LoseGame()
+    {
+        EndGame(false);
+    }
+
+    private void EndGame(bool victory)
     {
         if (levelFinished)
             return;
 
-        EndGame(false);
-    }
-
-    void EndGame(bool victory)
-    {
-        started = false;
         levelFinished = true;
-
-        reacting = false;
-        blinking = false;
-
-        TurnCharactersOff();
-
-        if (cristySprite != null)
-            cristySprite.color = Color.white;
+        gameStarted = false;
 
         ClearNotes();
 
-        if (victoryPanel != null)
-            victoryPanel.SetActive(victory);
+        isBlinking = false;
+        successReaction = false;
 
-        if (defeatPanel != null)
-            defeatPanel.SetActive(!victory);
+        RestoreCharacterColors();
 
-        if (finalScoreText != null)
-            finalScoreText.text = "Puntaje final: " + score;
+        SetPanel(comicPanel, false);
+        SetPanel(loadingPanel, false);
+        SetPanel(tutorialPanel, false);
+
+        SetGameplayUI(false);
+
+        SetPanel(victoryPanel, victory);
+        SetPanel(defeatPanel, !victory);
 
         if (victory)
         {
-            if (progressBar != null)
-                progressBar.value = 1f;
+            if (victoryScoreText != null)
+            {
+                victoryScoreText.text =
+                    "Puntaje final: " + score.ToString();
 
-            if (timerText != null)
-                timerText.text = "00:00";
-
-            Debug.Log(
-                "¡VICTORIA! Puntaje final: " + score);
+                Debug.Log("Puntaje final asignado: " + score);
+            }
+            else
+            {
+                Debug.LogWarning(
+                    "Victory Score Text no está asignado en el Inspector."
+                );
+            }
         }
         else
         {
-            Debug.Log(
-                "DERROTA. Puntaje final: " + score);
+            if (defeatScoreText != null)
+            {
+                defeatScoreText.text =
+                    "Puntaje final: " + score.ToString();
+
+                Debug.Log("Puntaje final asignado: " + score);
+            }
+            else
+            {
+                Debug.LogWarning(
+                    "Defeat Score Text no está asignado en el Inspector."
+                );
+            }
         }
+
+        UpdateUI();
     }
 
-    void ClearNotes()
+    // =====================================================
+    // LIMPIAR NOTAS
+    // =====================================================
+
+    private void ClearNotes()
     {
-        foreach (RhythmNote note in notes)
+        foreach (RhythmNote note in activeNotes)
         {
-            if (note.image != null)
+            if (note != null && note.image != null)
                 Destroy(note.image.gameObject);
         }
 
-        notes.Clear();
-    }
-
-    void TurnCharactersOff()
-    {
-        if (characters == null)
-            return;
-
-        foreach (RhythmCharacter character in characters)
-        {
-            if (character != null && character.sprite != null)
-                character.sprite.color = Color.white;
-        }
+        activeNotes.Clear();
     }
 }
