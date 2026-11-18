@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using UnityEngine.Serialization;
 
 public class RhythmLaneController : MonoBehaviour
 {
@@ -78,9 +79,24 @@ public class RhythmLaneController : MonoBehaviour
     public Image notePrefab;
 
     public float noteSpeed = 350f;
-    public float spawnInterval = 1.3f;
+
+    [FormerlySerializedAs("spawnInterval")]
+    [Min(0.1f)]
+    [Tooltip("Intervalo entre poses durante el primer minuto.")]
+    public float stage1SpawnInterval = 1.3f;
+
+    [Min(0.1f)]
+    [Tooltip("Intervalo entre poses durante el segundo minuto.")]
+    public float stage2SpawnInterval = 1.1f;
+
+    [Min(0.1f)]
+    [Tooltip("Intervalo entre poses durante el tercer minuto.")]
+    public float stage3SpawnInterval = 0.95f;
+
     public float noteSize = 40f;
     public float hitWindowPixels = 45f;
+
+    private float currentSpawnInterval = 1.3f;
 
     [Header("Poses combinadas")]
     [Range(0f, 1f)]
@@ -100,7 +116,12 @@ public class RhythmLaneController : MonoBehaviour
     // =====================================================
 
     [Header("Configuración del nivel")]
-    public float levelDuration = 30f;
+    [Tooltip("Duración total de la partida en segundos.")]
+    public float levelDuration = 180f;
+
+    [Tooltip("Duración de cada etapa de dificultad en segundos.")]
+    public float difficultyStageDuration = 60f;
+
     public int maxLives = 5;
     public int pointsPerHit = 50;
 
@@ -173,6 +194,9 @@ public class RhythmLaneController : MonoBehaviour
 
         elapsedTime += Time.deltaTime;
 
+        // Actualizar la dificultad según el tiempo transcurrido.
+        UpdateDifficulty();
+
         UpdateLevelProgress();
         UpdateNotes();
 
@@ -188,7 +212,7 @@ public class RhythmLaneController : MonoBehaviour
 
         spawnTimer += Time.deltaTime;
 
-        if (spawnTimer >= spawnInterval)
+        if (spawnTimer >= currentSpawnInterval)
         {
             SpawnNote();
             spawnTimer = 0f;
@@ -197,6 +221,28 @@ public class RhythmLaneController : MonoBehaviour
         if (elapsedTime >= levelDuration)
         {
             WinGame();
+        }
+    }
+
+    // =====================================================
+    // ACTUALIZAR DIFICULTAD
+    // =====================================================
+
+    private void UpdateDifficulty()
+    {
+        float stageDuration = Mathf.Max(1f, difficultyStageDuration);
+
+        if (elapsedTime < stageDuration)
+        {
+            currentSpawnInterval = stage1SpawnInterval;
+        }
+        else if (elapsedTime < stageDuration * 2f)
+        {
+            currentSpawnInterval = stage2SpawnInterval;
+        }
+        else
+        {
+            currentSpawnInterval = stage3SpawnInterval;
         }
     }
 
@@ -295,6 +341,9 @@ public class RhythmLaneController : MonoBehaviour
         reactionCharacter = null;
         reactionCharacter2 = null;
 
+        // Comenzamos siempre en la primera etapa.
+        UpdateDifficulty();
+
         RestoreCharacterColors();
 
         if (progressBar != null)
@@ -380,7 +429,6 @@ public class RhythmLaneController : MonoBehaviour
         Color firstColor,
         Color secondColor)
     {
-        // Ocultamos la imagen original del prefab.
         rootImage.enabled = false;
 
         Sprite noteSprite = rootImage.sprite;
@@ -530,14 +578,14 @@ public class RhythmLaneController : MonoBehaviour
             bool secondKeyDown =
                 Input.GetKeyDown(note.character2.key);
 
-            // Si se presionan las dos teclas en el mismo frame.
+            // Ambas teclas en el mismo frame.
             if (firstKeyDown && secondKeyDown)
             {
                 ResolveHit(note);
                 return;
             }
 
-            // Si la primera tecla presionada ya expiró.
+            // Comprobar si expiró la primera pulsación.
             if (note.pendingCharacter != null &&
                 Time.time - note.pendingTime > chordWindow)
             {
@@ -563,7 +611,7 @@ public class RhythmLaneController : MonoBehaviour
             }
             else
             {
-                // Ya se presionó la primera: esperamos la otra.
+                // Esperar la segunda tecla.
                 if (note.pendingCharacter == note.character &&
                     secondKeyDown)
                 {
